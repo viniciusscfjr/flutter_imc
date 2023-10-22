@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_imc/models/pessoa_sql_model.dart';
 
 import '../models/pessoa.dart';
+import '../repositories/sqlite/pessoa_sqllite_repository.dart';
 
 class ImcPage extends StatefulWidget {
   const ImcPage({Key? key}) : super(key: key);
@@ -15,43 +17,49 @@ class _ImcPageState extends State<ImcPage> {
   final TextEditingController _alturaController =
       TextEditingController(text: "");
   final TextEditingController idController = TextEditingController(text: "");
-  final List<Pessoa> _pessoas = [];
-  var id = 1;
+  List<Pessoa> _pessoas = [];
+  var id = 0;
 
-  void _adicionarPessoa() {
-    setState(() {
-      final nome = _nomeController.text;
-      final peso = double.tryParse(_pesoController.text) ?? 0.0;
-      final altura = double.tryParse(_alturaController.text) ?? 0.0;
-      if (nome.isNotEmpty && peso > 0 && altura > 0) {
-        final imc = peso / (altura * altura);
-        var estado = "";
+  PessoaSQLiteRepository pessoaSQLiteRepository = PessoaSQLiteRepository();
 
-        if (imc < 16) {
-          estado = "Magreza grave";
-        } else if (imc >= 16 && imc < 17) {
-          estado = "Magrega Moderada";
-        } else if (imc >= 17 && imc < 18.5) {
-          estado = "Magreza leve";
-        } else if (imc >= 18.5 && imc < 25) {
-          estado = "Saudável";
-        } else if (imc >= 25 && imc < 30) {
-          estado = "Sobrepeso";
-        } else if (imc >= 30 && imc < 35) {
-          estado = "Obesidade Grau I";
-        } else if (imc >= 35 && imc < 40) {
-          estado = "Obesidade Grau II (severa)";
-        } else {
-          estado = "Obesidade Grau 5 (mórbida)";
-        }
+  Future<void> _adicionarPessoa() async {
+    final nome = _nomeController.text;
+    final peso = double.tryParse(_pesoController.text) ?? 0.0;
+    final altura = double.tryParse(_alturaController.text) ?? 0.0;
+    if (nome.isNotEmpty && peso > 0 && altura > 0) {
+      final imc = peso / (altura * altura);
+      var estado = "";
 
-        _pessoas.add(Pessoa(id, nome, peso, altura, imc, estado));
+      if (imc < 16) {
+        estado = "Magreza grave";
+      } else if (imc >= 16 && imc < 17) {
+        estado = "Magrega Moderada";
+      } else if (imc >= 17 && imc < 18.5) {
+        estado = "Magreza leve";
+      } else if (imc >= 18.5 && imc < 25) {
+        estado = "Saudável";
+      } else if (imc >= 25 && imc < 30) {
+        estado = "Sobrepeso";
+      } else if (imc >= 30 && imc < 35) {
+        estado = "Obesidade Grau I";
+      } else if (imc >= 35 && imc < 40) {
+        estado = "Obesidade Grau II (severa)";
+      } else {
+        estado = "Obesidade Grau 5 (mórbida)";
+      }
+      var pessoaModel =
+          PessoaSQLiteModel.optionalId(nome, peso, altura, imc, estado);
+
+      final id = await pessoaSQLiteRepository.salvar(pessoaModel);
+
+      await _carregarPessoas();
+
+      setState(() {
         _nomeController.clear();
         _pesoController.clear();
         _alturaController.clear();
-        id++;
-      }
-    });
+      });
+    }
   }
 
   bool loading = false;
@@ -59,6 +67,29 @@ class _ImcPageState extends State<ImcPage> {
   @override
   void initState() {
     super.initState();
+    _carregarPessoas();
+  }
+
+  Future<void> _carregarPessoas() async {
+    final pessoasBanco = await pessoaSQLiteRepository.obterDados();
+
+    if (pessoasBanco.isNotEmpty) {
+      setState(() {
+        List<Pessoa> parsePessoa = [];
+
+        for (var pessoa in pessoasBanco) {
+          parsePessoa.add(Pessoa(
+              id: pessoa.id,
+              nome: pessoa.nome,
+              peso: pessoa.peso,
+              altura: pessoa.altura,
+              imc: pessoa.imc,
+              estado: pessoa.estado));
+        }
+
+        _pessoas = parsePessoa;
+      });
+    }
   }
 
   @override
@@ -105,10 +136,11 @@ class _ImcPageState extends State<ImcPage> {
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    setState(() {
-                      _pessoas.remove(pessoa);
-                      _adicionarPessoa();
-                    });
+                    await pessoaSQLiteRepository.remover(pessoa.id!);
+
+                    await _adicionarPessoa();
+
+                    await _carregarPessoas();
 
                     // Fechar o modal
                     // ignore: use_build_context_synchronously
@@ -160,6 +192,31 @@ class _ImcPageState extends State<ImcPage> {
           ElevatedButton(
             onPressed: _adicionarPessoa,
             child: const Text('Adicionar Pessoa'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await pessoaSQLiteRepository.limparSQLite();
+              await _carregarPessoas();
+
+              setState(() {
+                _pessoas = [];
+              });
+            },
+            style: ButtonStyle(
+                backgroundColor: MaterialStateProperty.all(Colors.red)),
+            child: const Text(
+              'Limpar SQLite',
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await _carregarPessoas();
+            },
+            style: ButtonStyle(
+                backgroundColor: MaterialStateProperty.all(Colors.amber)),
+            child: const Text(
+              'Refresh SQLite',
+            ),
           ),
           const SizedBox(
             height: 50,
@@ -223,10 +280,10 @@ class _ImcPageState extends State<ImcPage> {
                                   onPressed: () async {
                                     // Ação de excluir
                                     print('Excluir ${pessoa.id}');
+                                    await pessoaSQLiteRepository
+                                        .remover(pessoa.id!);
 
-                                    setState(() {
-                                      _pessoas.remove(pessoa);
-                                    });
+                                    await _carregarPessoas();
                                   },
                                 ),
                               ],
